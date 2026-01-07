@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zarchon - Hex Board Prototype</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        #root { width: 100%; min-height: 100vh; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+    const { useState, useCallback, useMemo } = React;
+
+    // ============== BOARD CONFIGURATION ==============
+    const BOARD_COLS = 8;
+    const BOARD_ROWS = 8;
+    const HEX_SIZE = 50;
+
+    const TERRAIN_TYPES = ['plains', 'forest', 'mountain', 'water', 'desert'];
+    const ELEVATION = { VALLEY: -1, NORMAL: 0, PEAK: 1 };
+
+    // ============== VISUAL THEMES ==============
+    const THEMES = {
+        fantasy: {
+            name: 'Fantasy Classic',
+            bg: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
+            terrainColors: {
+                plains: { fill: '#90b855', stroke: '#6b8a3f', shadow: '#4a6b2a' },
+                forest: { fill: '#2d5a27', stroke: '#1e3d1a', shadow: '#0f2a0d' },
+                mountain: { fill: '#8b8b8b', stroke: '#5a5a5a', shadow: '#3d3d3d' },
+                water: { fill: '#3498db', stroke: '#2071a7', shadow: '#1a5276' },
+                desert: { fill: '#d4a84b', stroke: '#b8860b', shadow: '#8b6914' }
+            },
+            elevationMod: { [-1]: -15, 0: 0, 1: 20 },
+            hexStroke: '#000',
+            fontColor: '#fff',
+            uiAccent: '#ffd700'
+        },
+        scifi: {
+            name: 'Sci-Fi Grid',
+            bg: 'linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 100%)',
+            terrainColors: {
+                plains: { fill: '#1a3a1a', stroke: '#00ff88', shadow: '#0a1f0a' },
+                forest: { fill: '#0a2a2a', stroke: '#00ffcc', shadow: '#051515' },
+                mountain: { fill: '#2a2a3a', stroke: '#8888ff', shadow: '#15152a' },
+                water: { fill: '#0a1a3a', stroke: '#00aaff', shadow: '#050d1f' },
+                desert: { fill: '#3a2a1a', stroke: '#ffaa00', shadow: '#1f150a' }
+            },
+            elevationMod: { [-1]: -10, 0: 0, 1: 15 },
+            hexStroke: '#333',
+            fontColor: '#0f0',
+            uiAccent: '#00ffaa'
+        },
+        natural: {
+            name: 'Earth Tones',
+            bg: 'linear-gradient(135deg, #2c1810 0%, #4a3728 100%)',
+            terrainColors: {
+                plains: { fill: '#a8c686', stroke: '#7a9a5a', shadow: '#5a7a3a' },
+                forest: { fill: '#4a7c45', stroke: '#2f5a2a', shadow: '#1f3a1a' },
+                mountain: { fill: '#9a8a7a', stroke: '#7a6a5a', shadow: '#5a4a3a' },
+                water: { fill: '#5a8aaa', stroke: '#3a6a8a', shadow: '#2a4a6a' },
+                desert: { fill: '#d4b896', stroke: '#b49876', shadow: '#947856' }
+            },
+            elevationMod: { [-1]: -20, 0: 0, 1: 25 },
+            hexStroke: '#2a2015',
+            fontColor: '#f5e6d3',
+            uiAccent: '#d4a574'
+        }
+    };
+
+    // ============== HEX MATH (cube coordinates) ==============
+    function offsetToCube(col, row) {
+        const x = col - Math.floor(row / 2);
+        const z = row;
+        const y = -x - z;
+        return { x, y, z };
+    }
+
+    function cubeDistance(a, b) {
+        return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y), Math.abs(a.z - b.z));
+    }
+
+    function hexCorners(cx, cy, size) {
+        const corners = [];
+        for (let i = 0; i < 6; i++) {
+            const angle = (Math.PI / 180) * (60 * i - 30);
+            corners.push({
+                x: cx + size * Math.cos(angle),
+                y: cy + size * Math.sin(angle)
+            });
+        }
+        return corners;
+    }
+
+    function hexToPixel(col, row, size) {
+        const x = size * Math.sqrt(3) * (col + 0.5 * (row % 2));
+        const y = size * 1.5 * row;
+        return { x: x + size * 1.5, y: y + size * 1.5 };
+    }
+
+    // ============== BOARD GENERATION ==============
+    function generateBoard() {
+        const cells = [];
+        for (let row = 0; row < BOARD_ROWS; row++) {
+            for (let col = 0; col < BOARD_COLS; col++) {
+                const terrain = TERRAIN_TYPES[Math.floor(Math.random() * TERRAIN_TYPES.length)];
+                let elevation = ELEVATION.NORMAL;
+                if (terrain === 'mountain') elevation = ELEVATION.PEAK;
+                else if (terrain === 'water') elevation = ELEVATION.VALLEY;
+                else if (Math.random() < 0.15) elevation = ELEVATION.VALLEY;
+                else if (Math.random() < 0.15) elevation = ELEVATION.PEAK;
+                
+                cells.push({
+                    id: `${col}-${row}`,
+                    col,
+                    row,
+                    cube: offsetToCube(col, row),
+                    terrain,
+                    elevation
+                });
+            }
+        }
+        return cells;
+    }
+
+    // ============== HEX CELL COMPONENT ==============
+    function HexCell({ cell, theme, isSelected, isHighlighted, onClick }) {
+        const { col, row, terrain, elevation } = cell;
+        const pos = hexToPixel(col, row, HEX_SIZE);
+        const corners = hexCorners(pos.x, pos.y, HEX_SIZE);
+        const points = corners.map(c => `${c.x},${c.y}`).join(' ');
+        
+        const colors = theme.terrainColors[terrain];
+        const elevOffset = theme.elevationMod[elevation];
+        
+        // 3D effect via offset
+        const baseY = pos.y + elevOffset;
+        const shadowCorners = hexCorners(pos.x, baseY + 8, HEX_SIZE * 0.95);
+        const shadowPoints = shadowCorners.map(c => `${c.x},${c.y}`).join(' ');
+        const topCorners = hexCorners(pos.x, baseY, HEX_SIZE);
+        const topPoints = topCorners.map(c => `${c.x},${c.y}`).join(' ');
+
+        return (
+            <g 
+                onClick={() => onClick(cell)} 
+                style={{ cursor: 'pointer' }}
+                role="button"
+                aria-label={`${terrain} at column ${col}, row ${row}`}
+            >
+                {/* Shadow/depth */}
+                <polygon
+                    points={shadowPoints}
+                    fill={colors.shadow}
+                    stroke="none"
+                />
+                {/* Side faces for elevation */}
+                {elevation !== 0 && (
+                    <polygon
+                        points={`${topCorners[4].x},${topCorners[4].y} ${topCorners[5].x},${topCorners[5].y} ${shadowCorners[5].x},${shadowCorners[5].y} ${shadowCorners[4].x},${shadowCorners[4].y}`}
+                        fill={colors.shadow}
+                        stroke={theme.hexStroke}
+                        strokeWidth="1"
+                    />
+                )}
+                {/* Top face */}
+                <polygon
+                    points={topPoints}
+                    fill={colors.fill}
+                    stroke={isSelected ? theme.uiAccent : colors.stroke}
+                    strokeWidth={isSelected ? 3 : 1.5}
+                    opacity={isHighlighted ? 0.8 : 1}
+                />
+                {/* Highlight overlay */}
+                {isHighlighted && (
+                    <polygon
+                        points={topPoints}
+                        fill={theme.uiAccent}
+                        opacity={0.3}
+                    />
+                )}
+                {/* Elevation indicator */}
+                {elevation !== 0 && (
+                    <text
+                        x={pos.x}
+                        y={baseY + 5}
+                        textAnchor="middle"
+                        fontSize="12"
+                        fill={theme.fontColor}
+                        opacity={0.7}
+                    >
+                        {elevation > 0 ? '▲' : '▼'}
+                    </text>
+                )}
+            </g>
+        );
+    }
+
+    // ============== MAIN APP ==============
+    function App() {
+        const [themeName, setThemeName] = useState('fantasy');
+        const [board, setBoard] = useState(() => generateBoard());
+        const [selectedCell, setSelectedCell] = useState(null);
+        const [error, setError] = useState(null);
+
+        const theme = THEMES[themeName];
+
+        const highlightedCells = useMemo(() => {
+            if (!selectedCell) return new Set();
+            const highlighted = new Set();
+            board.forEach(cell => {
+                const dist = cubeDistance(selectedCell.cube, cell.cube);
+                if (dist > 0 && dist <= 3) {
+                    // Can't move through mountains unless flying (future)
+                    highlighted.add(cell.id);
+                }
+            });
+            return highlighted;
+        }, [selectedCell, board]);
+
+        const handleCellClick = useCallback((cell) => {
+            try {
+                if (selectedCell?.id === cell.id) {
+                    setSelectedCell(null);
+                } else {
+                    setSelectedCell(cell);
+                }
+                setError(null);
+            } catch (e) {
+                setError(`Click error: ${e.message}`);
+            }
+        }, [selectedCell]);
+
+        const regenerateBoard = () => {
+            try {
+                setBoard(generateBoard());
+                setSelectedCell(null);
+                setError(null);
+            } catch (e) {
+                setError(`Generation error: ${e.message}`);
+            }
+        };
+
+        // Calculate SVG dimensions
+        const svgWidth = HEX_SIZE * Math.sqrt(3) * BOARD_COLS + HEX_SIZE * 2;
+        const svgHeight = HEX_SIZE * 1.5 * BOARD_ROWS + HEX_SIZE * 2.5;
+
+        return (
+            <div style={{ 
+                background: theme.bg, 
+                minHeight: '100vh', 
+                padding: '20px',
+                color: theme.fontColor 
+            }}>
+                {/* Header */}
+                <div style={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between', 
+                    alignItems: 'center',
+                    marginBottom: '20px',
+                    flexWrap: 'wrap',
+                    gap: '10px'
+                }}>
+                    <h1 style={{ 
+                        fontSize: '24px', 
+                        color: theme.uiAccent,
+                        textShadow: '0 2px 4px rgba(0,0,0,0.5)'
+                    }}>
+                        ZARCHON - Board Prototype
+                    </h1>
+                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                        {Object.entries(THEMES).map(([key, t]) => (
+                            <button
+                                key={key}
+                                onClick={() => setThemeName(key)}
+                                style={{
+                                    padding: '8px 16px',
+                                    background: themeName === key ? theme.uiAccent : 'rgba(255,255,255,0.1)',
+                                    color: themeName === key ? '#000' : theme.fontColor,
+                                    border: `2px solid ${theme.uiAccent}`,
+                                    borderRadius: '4px',
+                                    cursor: 'pointer',
+                                    fontWeight: themeName === key ? 'bold' : 'normal'
+                                }}
+                            >
+                                {t.name}
+                            </button>
+                        ))}
+                        <button
+                            onClick={regenerateBoard}
+                            style={{
+                                padding: '8px 16px',
+                                background: 'rgba(255,255,255,0.1)',
+                                color: theme.fontColor,
+                                border: `2px solid ${theme.fontColor}`,
+                                borderRadius: '4px',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            New Board
+                        </button>
+                    </div>
+                </div>
+
+                {/* Error display */}
+                {error && (
+                    <div style={{
+                        background: '#ff4444',
+                        color: '#fff',
+                        padding: '10px',
+                        borderRadius: '4px',
+                        marginBottom: '10px'
+                    }}>
+                        {error}
+                    </div>
+                )}
+
+                {/* Info panel */}
+                <div style={{ 
+                    marginBottom: '15px', 
+                    padding: '10px', 
+                    background: 'rgba(0,0,0,0.3)',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    gap: '20px',
+                    flexWrap: 'wrap',
+                    fontSize: '14px'
+                }}>
+                    <span>Click hex to select</span>
+                    <span>|</span>
+                    <span>Highlighted = 3-hex movement range</span>
+                    <span>|</span>
+                    <span>▲ = Peak | ▼ = Valley</span>
+                    {selectedCell && (
+                        <>
+                            <span>|</span>
+                            <span style={{ color: theme.uiAccent }}>
+                                Selected: {selectedCell.terrain} ({selectedCell.col},{selectedCell.row})
+                            </span>
+                        </>
+                    )}
+                </div>
+
+                {/* Board */}
+                <div style={{ 
+                    overflowX: 'auto', 
+                    display: 'flex', 
+                    justifyContent: 'center' 
+                }}>
+                    <svg 
+                        width={svgWidth} 
+                        height={svgHeight}
+                        style={{ 
+                            filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.4))'
+                        }}
+                    >
+                        {board.map(cell => (
+                            <HexCell
+                                key={cell.id}
+                                cell={cell}
+                                theme={theme}
+                                isSelected={selectedCell?.id === cell.id}
+                                isHighlighted={highlightedCells.has(cell.id)}
+                                onClick={handleCellClick}
+                            />
+                        ))}
+                    </svg>
+                </div>
+
+                {/* Legend */}
+                <div style={{
+                    marginTop: '20px',
+                    display: 'flex',
+                    gap: '15px',
+                    justifyContent: 'center',
+                    flexWrap: 'wrap'
+                }}>
+                    {TERRAIN_TYPES.map(terrain => (
+                        <div key={terrain} style={{ 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            gap: '6px' 
+                        }}>
+                            <div style={{
+                                width: '20px',
+                                height: '20px',
+                                background: theme.terrainColors[terrain].fill,
+                                border: `2px solid ${theme.terrainColors[terrain].stroke}`,
+                                borderRadius: '3px'
+                            }} />
+                            <span style={{ textTransform: 'capitalize' }}>{terrain}</span>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+    }
+
+    // ============== ERROR BOUNDARY ==============
+    class ErrorBoundary extends React.Component {
+        constructor(props) {
+            super(props);
+            this.state = { hasError: false, error: null };
+        }
+        static getDerivedStateFromError(error) {
+            return { hasError: true, error };
+        }
+        render() {
+            if (this.state.hasError) {
+                return (
+                    <div style={{ 
+                        padding: '40px', 
+                        background: '#1a1a2e', 
+                        color: '#ff6b6b',
+                        minHeight: '100vh'
+                    }}>
+                        <h1>Something went wrong</h1>
+                        <pre style={{ 
+                            background: '#0a0a15', 
+                            padding: '20px', 
+                            borderRadius: '8px',
+                            overflow: 'auto'
+                        }}>
+                            {this.state.error?.toString()}
+                        </pre>
+                        <button 
+                            onClick={() => window.location.reload()}
+                            style={{
+                                marginTop: '20px',
+                                padding: '10px 20px',
+                                background: '#ff6b6b',
+                                color: '#000',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            Reload
+                        </button>
+                    </div>
+                );
+            }
+            return this.props.children;
+        }
+    }
+
+    // ============== RENDER ==============
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(
+        <ErrorBoundary>
+            <App />
+        </ErrorBoundary>
+    );
+    </script>
+</body>
+</html>
