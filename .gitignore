@@ -1,16 +1,16 @@
-# Godot 4+ specific ignores
-.godot/
-/android/
-
 # macOS
 .DS_Store
-*.swp
-*~
 
 # IDE
-.vscode/
 .idea/
+.vscode/
+*.swp
 
-# Build outputs
-/build/
-/export/
+# Node (if we add build tools later)
+node_modules/
+dist/
+build/
+
+# Godot (archived but ignore cache)
+.godot/
+*.import

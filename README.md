@@ -4,22 +4,13 @@
 
 Hex-grid tactical strategy meets real-time arcade combat.
 
-![Status](https://img.shields.io/badge/Status-In%20Development-yellow)
-![Phase](https://img.shields.io/badge/Phase-2%20Team%20Design-blue)
-![Engine](https://img.shields.io/badge/Engine-Godot%204.5-purple)
-
 ---
 
-## 🎮 What is Zarchon?
+## 🎮 Tech Stack
 
-Zarchon combines two distinct gameplay modes:
-1. **Strategic Phase:** Position units on a hex-grid board with terrain and elevation
-2. **Combat Phase:** When units collide, battle in real-time arcade combat
+**React** (single-file HTML prototypes for rapid iteration)
 
-Inspired by the classic Archon series, Zarchon modernizes the formula with:
-- Two asymmetric factions (Tech vs Nature)
-- Cross-platform play with input parity
-- Hex-based terrain with tactical depth
+No build step. CDN imports. Test instantly in any browser.
 
 ---
 
@@ -30,7 +21,7 @@ Inspired by the classic Archon series, Zarchon modernizes the formula with:
 | Steam (Windows/Mac/Linux) | Primary |
 | Google Play (Android) | Primary |
 | Linux/Ubuntu | Supported |
-| Raspberry Pi | Supported |
+| Raspberry Pi / x86 SBC | Supported |
 | Console | Future |
 
 ---
@@ -39,65 +30,41 @@ Inspired by the classic Archon series, Zarchon modernizes the formula with:
 
 ```
 zarchon-1/
-├── game/                 # ← ACTIVE Godot project
-│   ├── scenes/
-│   ├── scripts/
-│   │   ├── HexCell.gd
-│   │   ├── HexGrid.gd
-│   │   ├── Unit.gd
-│   │   └── Board.gd
-│   └── project.godot
+├── src/                  # ← ACTIVE React development
 ├── docs/
 │   └── design/
 │       └── PHASE2-TEAM-PLANNING.md
-├── _archive_stub/        # ← OLD/UNUSED files (ignore)
+├── _archived_godot/      # ← SHELVED (not using Godot)
 ├── DEVLOG.md
 └── README.md
 ```
-
-**To open in Godot:** Import `game/project.godot`
 
 ---
 
 ## ⚔️ Factions
 
 ### THE ASCENDANCY (Technocracy)
-*"Through logic and innovation, we shall inherit the cosmos."*
-
-Chrome mechs, drones, and energy weapons. Excels at precision damage and defensive shields.
+Chrome mechs, drones, energy weapons. Precision damage + shields.
 
 ### GAIA'S CHOSEN (Earth/Nature)  
-*"The planet remembers. The planet protects. The planet avenges."*
-
-Organic beasts, elementals, and natural forces. Excels at area control and sustained damage.
+Organic beasts, elementals, natural forces. Area control + sustain.
 
 ---
 
 ## 🚀 Development Status
 
-See [DEVLOG.md](DEVLOG.md) for detailed progress.
-
-- ✅ **Phase 1:** Core board mechanics (hex grid, terrain, movement)
-- 🔄 **Phase 2:** Team design and unit implementation (IN PROGRESS)
-- 📋 **Phase 3:** Combat arena system
-- 📋 **Phase 4:** Polish, AI, and multiplayer
+- ✅ **Research:** Archon mechanics, unit design, balance theory
+- ✅ **Phase 2 Planning:** Complete faction/unit specifications
+- 🔄 **Phase 1:** 8x8 hex board with terrain (NEXT)
+- 📋 **Phase 2:** Unit implementation
+- 📋 **Phase 3:** Combat arena
 
 ---
 
 ## 📚 Documentation
 
-- [Phase 2: Team Planning](docs/design/PHASE2-TEAM-PLANNING.md) - Faction and unit design
-- [Quickstart Guide](game/QUICKSTART.md) - How to run the game
+- [Phase 2: Team Planning](docs/design/PHASE2-TEAM-PLANNING.md) - Faction and unit specs
 
 ---
 
-## 🙏 Credits
-
-- Inspired by **Archon** (1983) by Free Fall Associates
-- **Archon Ultra** (1994) by Strategic Simulations Inc.
-- Hex grid mathematics from Red Blob Games
-- Built by Liam with Claude (Anthropic)
-
----
-
-*Last Updated: January 2026*
+*React-based development. Godot shelved.*
