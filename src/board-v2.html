@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zarchon - Strategic Board v2</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #0a0a12 0%, #1a1a2e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+        #root { width: 100%; min-height: 100vh; padding: 20px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+    const { useState, useCallback, useMemo } = React;
+
+    const BOARD_COLS = 8;
+    const BOARD_ROWS = 8;
+    const HEX_SIZE = 48;
+    const HEX_GAP = 0.88; // Gap between hexes (smaller = more gap)
+
+    const TERRAIN_TYPES = ['plains', 'forest', 'mountain', 'water', 'desert'];
+
+    // Split theme: Left = Fantasy, Right = Sci-Fi
+    const THEMES = {
+        fantasy: {
+            terrainColors: {
+                plains: { fill: '#90b855', stroke: '#6b8a3f', shadow: '#4a6b2a' },
+                forest: { fill: '#2d5a27', stroke: '#1e3d1a', shadow: '#0f2a0d' },
+                mountain: { fill: '#8b8b8b', stroke: '#5a5a5a', shadow: '#3d3d3d' },
+                water: { fill: '#3498db', stroke: '#2071a7', shadow: '#1a5276' },
+                desert: { fill: '#d4a84b', stroke: '#b8860b', shadow: '#8b6914' },
+                energy: { fill: '#ffdd44', stroke: '#ffaa00', shadow: '#cc8800' }
+            },
+            hexStroke: '#222',
+            accent: '#ffd700'
+        },
+        scifi: {
+            terrainColors: {
+                plains: { fill: '#1a3a1a', stroke: '#00ff88', shadow: '#0a1f0a' },
+                forest: { fill: '#0a2a2a', stroke: '#00ffcc', shadow: '#051515' },
+                mountain: { fill: '#2a2a3a', stroke: '#8888ff', shadow: '#15152a' },
+                water: { fill: '#0a1a3a', stroke: '#00aaff', shadow: '#050d1f' },
+                desert: { fill: '#3a2a1a', stroke: '#ffaa00', shadow: '#1f150a' },
+                energy: { fill: '#00ffaa', stroke: '#00cc88', shadow: '#008866' }
+            },
+            hexStroke: '#333',
+            accent: '#00ffaa'
+        }
+    };
+
+    // Luminosity phases: 0=Dark, 0.25=Dim, 0.5=Neutral, 0.75=Bright, 1=Light
+    const LUMINOSITY_PHASES = ['Dark', 'Dim', 'Neutral', 'Bright', 'Light'];
+
+    function offsetToCube(col, row) {
+        const x = col - Math.floor(row / 2);
+        const z = row;
+        const y = -x - z;
+        return { x, y, z };
+    }
+
+    function cubeDistance(a, b) {
+        return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y), Math.abs(a.z - b.z));
+    }
+
+    function hexCorners(cx, cy, size) {
+        const corners = [];
+        for (let i = 0; i < 6; i++) {
+            const angle = (Math.PI / 180) * (60 * i - 30);
+            corners.push({
+                x: cx + size * Math.cos(angle),
+                y: cy + size * Math.sin(angle)
+            });
+        }
+        return corners;
+    }
+
+    function hexToPixel(col, row, size) {
+        const x = size * Math.sqrt(3) * (col + 0.5 * (row % 2));
+        const y = size * 1.5 * row;
+        return { x: x + size * 2, y: y + size * 2 };
+    }
+
+    // Energy hex positions: 2 mid, 2 on each team side (6 total)
+    function isEnergyHex(col, row) {
+        // Mid board energy (rows 3-4, cols 3-4)
+        if ((row === 3 || row === 4) && (col === 3 || col === 4)) {
+            if ((row === 3 && col === 3) || (row === 4 && col === 4)) return true;
+        }
+        // Team side energy (row 1 col 1, row 1 col 6 for top; row 6 col 1, row 6 col 6 for bottom)
+        if (row === 1 && (col === 1 || col === 6)) return true;
+        if (row === 6 && (col === 1 || col === 6)) return true;
+        return false;
+    }
+
+    // Static hexes don't shift with luminosity
+    function isStaticHex(col, row) {
+        return (col + row) % 5 === 0;
+    }
+
+    function generateBoard(seed) {
+        const cells = [];
+        const rng = (i) => Math.abs(Math.sin(seed + i * 9973) * 10000) % 1;
+        let idx = 0;
+        for (let row = 0; row < BOARD_ROWS; row++) {
+            for (let col = 0; col < BOARD_COLS; col++) {
+                let terrain;
+                if (isEnergyHex(col, row)) {
+                    terrain = 'energy';
+                } else {
+                    terrain = TERRAIN_TYPES[Math.floor(rng(idx++) * TERRAIN_TYPES.length)];
+                }
+                
+                let elevation = 0;
+                if (terrain === 'mountain') elevation = 1;
+                else if (terrain === 'water') elevation = -1;
+                else if (terrain !== 'energy' && rng(idx++) < 0.12) elevation = -1;
+                else if (terrain !== 'energy' && rng(idx++) < 0.12) elevation = 1;
+
+                cells.push({
+                    id: `${col}-${row}`,
+                    col, row,
+                    cube: offsetToCube(col, row),
+                    terrain,
+                    elevation,
+                    isStatic: isStaticHex(col, row),
+                    isEnergy: terrain === 'energy'
+                });
+            }
+        }
+        return cells;
+    }
+
+    function HexCell({ cell, luminosity, isSelected, isHighlighted, onClick }) {
+        const { col, row, terrain, elevation, isStatic, isEnergy } = cell;
+        const pos = hexToPixel(col, row, HEX_SIZE);
+        
+        // Split theme: left half Fantasy, right half Sci-Fi
+        const theme = col < BOARD_COLS / 2 ? THEMES.fantasy : THEMES.scifi;
+        const colors = theme.terrainColors[terrain];
+        
+        // Apply luminosity shift (static hexes stay neutral)
+        const effectiveLum = isStatic ? 0.5 : luminosity;
+        const lumMod = (effectiveLum - 0.5) * 40; // -20 to +20 brightness shift
+        
+        function adjustColor(hex, amount) {
+            const r = Math.min(255, Math.max(0, parseInt(hex.slice(1, 3), 16) + amount));
+            const g = Math.min(255, Math.max(0, parseInt(hex.slice(3, 5), 16) + amount));
+            const b = Math.min(255, Math.max(0, parseInt(hex.slice(5, 7), 16) + amount));
+            return `rgb(${r},${g},${b})`;
+        }
+
+        const fill = adjustColor(colors.fill, lumMod);
+        const elevOffset = elevation * 12;
+        
+        const baseY = pos.y - elevOffset;
+        const gappedSize = HEX_SIZE * HEX_GAP;
+        const shadowCorners = hexCorners(pos.x, baseY + 8, gappedSize * 0.95);
+        const shadowPoints = shadowCorners.map(c => `${c.x},${c.y}`).join(' ');
+        const topCorners = hexCorners(pos.x, baseY, gappedSize);
+        const topPoints = topCorners.map(c => `${c.x},${c.y}`).join(' ');
+
+        return (
+            <g onClick={() => onClick(cell)} style={{ cursor: 'pointer' }}>
+                {/* Shadow/depth */}
+                <polygon points={shadowPoints} fill={colors.shadow} stroke="none" />
+                {/* Side face for elevation */}
+                {elevation !== 0 && (
+                    <polygon
+                        points={`${topCorners[4].x},${topCorners[4].y} ${topCorners[5].x},${topCorners[5].y} ${shadowCorners[5].x},${shadowCorners[5].y} ${shadowCorners[4].x},${shadowCorners[4].y}`}
+                        fill={colors.shadow}
+                        stroke={theme.hexStroke}
+                        strokeWidth="1"
+                    />
+                )}
+                {/* Top face */}
+                <polygon
+                    points={topPoints}
+                    fill={fill}
+                    stroke={isSelected ? '#fff' : theme.hexStroke}
+                    strokeWidth={isSelected ? 4 : 2.5}
+                />
+                {/* Highlight overlay */}
+                {isHighlighted && (
+                    <polygon points={topPoints} fill={theme.accent} opacity={0.35} />
+                )}
+                {/* Energy hex glow */}
+                {isEnergy && (
+                    <>
+                        <polygon 
+                            points={topPoints} 
+                            fill="none" 
+                            stroke={theme.accent}
+                            strokeWidth="3"
+                            opacity={0.6 + Math.sin(Date.now() / 300) * 0.2}
+                        />
+                        <text
+                            x={pos.x}
+                            y={baseY + 4}
+                            textAnchor="middle"
+                            fontSize="14"
+                            fill="#fff"
+                            fontWeight="bold"
+                        >
+                            ✦
+                        </text>
+                    </>
+                )}
+                {/* Elevation indicator */}
+                {elevation !== 0 && !isEnergy && (
+                    <text
+                        x={pos.x}
+                        y={baseY + 4}
+                        textAnchor="middle"
+                        fontSize="11"
+                        fill="#fff"
+                        opacity={0.6}
+                    >
+                        {elevation > 0 ? '▲' : '▼'}
+                    </text>
+                )}
+                {/* Static hex marker */}
+                {isStatic && !isEnergy && (
+                    <circle cx={pos.x} cy={baseY} r={4} fill="#fff" opacity={0.3} />
+                )}
+            </g>
+        );
+    }
+
+    function App() {
+        const [seed, setSeed] = useState(42);
+        const [turn, setTurn] = useState(0);
+        const [selectedCell, setSelectedCell] = useState(null);
+
+        const board = useMemo(() => generateBoard(seed), [seed]);
+
+        // Luminosity cycles through 5 phases over turns
+        const luminosity = (Math.sin(turn * 0.5) + 1) / 2; // 0 to 1
+        const lumPhaseIndex = Math.floor(luminosity * 4.99);
+        const lumPhase = LUMINOSITY_PHASES[lumPhaseIndex];
+
+        const highlightedCells = useMemo(() => {
+            if (!selectedCell) return new Set();
+            const highlighted = new Set();
+            board.forEach(cell => {
+                const dist = cubeDistance(selectedCell.cube, cell.cube);
+                if (dist > 0 && dist <= 3) highlighted.add(cell.id);
+            });
+            return highlighted;
+        }, [selectedCell, board]);
+
+        const handleCellClick = useCallback((cell) => {
+            setSelectedCell(prev => prev?.id === cell.id ? null : cell);
+        }, []);
+
+        const nextTurn = () => setTurn(t => t + 1);
+        const newBoard = () => { setSeed(s => s + 1); setTurn(0); setSelectedCell(null); };
+
+        const svgWidth = HEX_SIZE * Math.sqrt(3) * BOARD_COLS + HEX_SIZE * 3;
+        const svgHeight = HEX_SIZE * 1.5 * BOARD_ROWS + HEX_SIZE * 3;
+
+        return (
+            <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
+                <h1 style={{ 
+                    textAlign: 'center', 
+                    marginBottom: '15px',
+                    fontSize: '26px'
+                }}>
+                    <span style={{ color: '#ffd700' }}>ZARCHON</span>
+                    <span style={{ color: '#666', fontSize: '16px' }}> - Strategic Board v2</span>
+                </h1>
+
+                {/* Controls */}
+                <div style={{ 
+                    display: 'flex', 
+                    justifyContent: 'center', 
+                    gap: '15px', 
+                    marginBottom: '15px',
+                    flexWrap: 'wrap'
+                }}>
+                    <button onClick={nextTurn} style={btnStyle}>
+                        ⏭️ Next Turn (#{turn})
+                    </button>
+                    <button onClick={newBoard} style={btnStyle}>
+                        🗺️ New Map
+                    </button>
+                    <div style={infoBoxStyle}>
+                        Luminosity: <strong style={{ color: luminosity > 0.5 ? '#fff' : '#888' }}>{lumPhase}</strong>
+                        <div style={{
+                            width: '60px',
+                            height: '12px',
+                            background: `linear-gradient(90deg, #222, #fff)`,
+                            borderRadius: '3px',
+                            position: 'relative',
+                            marginLeft: '8px',
+                            display: 'inline-block',
+                            verticalAlign: 'middle'
+                        }}>
+                            <div style={{
+                                position: 'absolute',
+                                left: `${luminosity * 100}%`,
+                                top: '-2px',
+                                width: '4px',
+                                height: '16px',
+                                background: '#ff0',
+                                borderRadius: '2px',
+                                transform: 'translateX(-50%)'
+                            }} />
+                        </div>
+                    </div>
+                </div>
+
+                {/* Info panel */}
+                <div style={{ 
+                    marginBottom: '10px', 
+                    padding: '10px', 
+                    background: 'rgba(0,0,0,0.4)',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    display: 'flex',
+                    gap: '15px',
+                    flexWrap: 'wrap',
+                    justifyContent: 'center'
+                }}>
+                    <span>Left = <span style={{ color: '#ffd700' }}>Fantasy</span> | Right = <span style={{ color: '#00ffaa' }}>Sci-Fi</span></span>
+                    <span>|</span>
+                    <span>✦ = Energy (heals)</span>
+                    <span>|</span>
+                    <span>○ = Static (no lum shift)</span>
+                    <span>|</span>
+                    <span>Click hex → 3-hex range</span>
+                    {selectedCell && (
+                        <>
+                            <span>|</span>
+                            <span style={{ color: '#0f0' }}>
+                                {selectedCell.terrain} ({selectedCell.col},{selectedCell.row})
+                            </span>
+                        </>
+                    )}
+                </div>
+
+                {/* Board */}
+                <div style={{ 
+                    display: 'flex', 
+                    justifyContent: 'center',
+                    background: 'rgba(0,0,0,0.3)',
+                    borderRadius: '12px',
+                    padding: '15px'
+                }}>
+                    <svg width={svgWidth} height={svgHeight}>
+                        {board.map(cell => (
+                            <HexCell
+                                key={cell.id}
+                                cell={cell}
+                                luminosity={luminosity}
+                                isSelected={selectedCell?.id === cell.id}
+                                isHighlighted={highlightedCells.has(cell.id)}
+                                onClick={handleCellClick}
+                            />
+                        ))}
+                    </svg>
+                </div>
+
+                {/* Legend */}
+                <div style={{
+                    marginTop: '15px',
+                    display: 'flex',
+                    gap: '20px',
+                    justifyContent: 'center',
+                    flexWrap: 'wrap',
+                    fontSize: '11px'
+                }}>
+                    {[...TERRAIN_TYPES, 'energy'].map(terrain => (
+                        <div key={terrain} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <div style={{
+                                width: '16px',
+                                height: '16px',
+                                background: THEMES.fantasy.terrainColors[terrain].fill,
+                                border: `2px solid ${THEMES.fantasy.terrainColors[terrain].stroke}`,
+                                borderRadius: '3px'
+                            }} />
+                            <span style={{ textTransform: 'capitalize' }}>
+                                {terrain === 'energy' ? '✦ Energy' : terrain}
+                            </span>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+    }
+
+    const btnStyle = {
+        padding: '10px 20px',
+        fontSize: '14px',
+        background: 'rgba(255,255,255,0.1)',
+        color: '#fff',
+        border: '2px solid #666',
+        borderRadius: '6px',
+        cursor: 'pointer'
+    };
+
+    const infoBoxStyle = {
+        padding: '10px 15px',
+        background: 'rgba(0,0,0,0.3)',
+        borderRadius: '6px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px'
+    };
+
+    class ErrorBoundary extends React.Component {
+        constructor(props) { super(props); this.state = { hasError: false }; }
+        static getDerivedStateFromError(error) { return { hasError: true, error }; }
+        render() {
+            if (this.state.hasError) {
+                return <div style={{ padding: '40px', color: '#f66' }}>
+                    <h1>Error</h1>
+                    <pre>{this.state.error?.toString()}</pre>
+                </div>;
+            }
+            return this.props.children;
+        }
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<ErrorBoundary><App /></ErrorBoundary>);
+    </script>
+</body>
+</html>

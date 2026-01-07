@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zarchon - Combat Arena Test</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #0a0a12 0%, #1a1a2e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+        #root { width: 100%; min-height: 100vh; padding: 20px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    // ============== COMBAT CONFIGURATION ==============
+    const ARENA_RADIUS = 4; // Hex rings from center
+    const HEX_SIZE = 45;
+    const TICK_RATE = 50; // ms per game tick
+
+    // Pawn stats (Sentinel Drone / Thornling)
+    const PAWN_STATS = {
+        tech: {
+            name: 'Sentinel Drone',
+            maxHp: 8,
+            speed: 2.5, // pixels per tick
+            damage: 5,
+            attackCooldown: 800, // ms
+            attackRange: 120, // pixels
+            projectileSpeed: 8,
+            color: '#00aaff',
+            accentColor: '#0066cc',
+            regenRate: 0 // HP per second
+        },
+        gaia: {
+            name: 'Thornling',
+            maxHp: 8,
+            speed: 2.2,
+            damage: 5,
+            attackCooldown: 900,
+            attackRange: 100,
+            projectileSpeed: 6,
+            color: '#44cc44',
+            accentColor: '#228822',
+            regenRate: 0.2 // 1 HP per 5 sec
+        }
+    };
+
+    // ============== HEX MATH ==============
+    function hexCorners(cx, cy, size) {
+        const corners = [];
+        for (let i = 0; i < 6; i++) {
+            const angle = (Math.PI / 180) * (60 * i - 30);
+            corners.push({
+                x: cx + size * Math.cos(angle),
+                y: cy + size * Math.sin(angle)
+            });
+        }
+        return corners;
+    }
+
+    function cubeToPixel(q, r, size) {
+        const x = size * (Math.sqrt(3) * q + Math.sqrt(3) / 2 * r);
+        const y = size * (3 / 2 * r);
+        return { x, y };
+    }
+
+    function generateArenaHexes(radius) {
+        const hexes = [];
+        for (let q = -radius; q <= radius; q++) {
+            for (let r = -radius; r <= radius; r++) {
+                const s = -q - r;
+                if (Math.abs(s) <= radius) {
+                    hexes.push({ q, r, s });
+                }
+            }
+        }
+        return hexes;
+    }
+
+    function distance(x1, y1, x2, y2) {
+        return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+    }
+
+    function normalize(x, y) {
+        const len = Math.sqrt(x * x + y * y);
+        if (len === 0) return { x: 0, y: 0 };
+        return { x: x / len, y: y / len };
+    }
+
+    // ============== ARENA HEX COMPONENT ==============
+    function ArenaHex({ q, r, size, centerX, centerY, luminosity }) {
+        const pos = cubeToPixel(q, r, size);
+        const cx = centerX + pos.x;
+        const cy = centerY + pos.y;
+        const corners = hexCorners(cx, cy, size * 0.92); // Gap between hexes
+        const points = corners.map(c => `${c.x},${c.y}`).join(' ');
+
+        // Luminosity affects fill
+        const isStatic = (q + r) % 3 === 0; // Some hexes don't shift
+        const lum = isStatic ? 0.5 : luminosity;
+        const baseGray = Math.floor(30 + lum * 60);
+        const fill = `rgb(${baseGray}, ${baseGray + 5}, ${baseGray + 15})`;
+        const strokeColor = lum > 0.5 ? '#888' : '#444';
+
+        return (
+            <polygon
+                points={points}
+                fill={fill}
+                stroke={strokeColor}
+                strokeWidth="2"
+            />
+        );
+    }
+
+    // ============== UNIT COMPONENT ==============
+    function Unit({ unit, isActive }) {
+        const hpPercent = (unit.hp / unit.maxHp) * 100;
+        const stats = PAWN_STATS[unit.faction];
+        
+        return (
+            <g>
+                {/* Unit body */}
+                <circle
+                    cx={unit.x}
+                    cy={unit.y}
+                    r={20}
+                    fill={stats.color}
+                    stroke={isActive ? '#fff' : stats.accentColor}
+                    strokeWidth={isActive ? 3 : 2}
+                    opacity={unit.hp > 0 ? 1 : 0.3}
+                />
+                {/* Direction indicator */}
+                <circle
+                    cx={unit.x + Math.cos(unit.angle) * 12}
+                    cy={unit.y + Math.sin(unit.angle) * 12}
+                    r={5}
+                    fill={stats.accentColor}
+                />
+                {/* HP bar background */}
+                <rect
+                    x={unit.x - 22}
+                    y={unit.y - 35}
+                    width={44}
+                    height={8}
+                    fill="#333"
+                    stroke="#000"
+                    strokeWidth="1"
+                    rx="2"
+                />
+                {/* HP bar fill */}
+                <rect
+                    x={unit.x - 21}
+                    y={unit.y - 34}
+                    width={42 * hpPercent / 100}
+                    height={6}
+                    fill={hpPercent > 50 ? '#4f4' : hpPercent > 25 ? '#ff4' : '#f44'}
+                    rx="1"
+                />
+                {/* Name label */}
+                <text
+                    x={unit.x}
+                    y={unit.y + 40}
+                    textAnchor="middle"
+                    fontSize="11"
+                    fill={stats.color}
+                    fontWeight="bold"
+                >
+                    {stats.name}
+                </text>
+            </g>
+        );
+    }
+
+    // ============== PROJECTILE COMPONENT ==============
+    function Projectile({ proj }) {
+        const stats = PAWN_STATS[proj.faction];
+        return (
+            <circle
+                cx={proj.x}
+                cy={proj.y}
+                r={6}
+                fill={stats.color}
+                opacity={0.9}
+                style={{ filter: `drop-shadow(0 0 4px ${stats.color})` }}
+            />
+        );
+    }
+
+    // ============== AI CONTROLLER ==============
+    function runAI(unit, enemy, arenaRadius) {
+        if (unit.hp <= 0) return { moveX: 0, moveY: 0, attack: false };
+        
+        const dist = distance(unit.x, unit.y, enemy.x, enemy.y);
+        const stats = PAWN_STATS[unit.faction];
+        const now = Date.now();
+        const canAttack = now - unit.lastAttack >= stats.attackCooldown;
+        
+        let moveX = 0, moveY = 0;
+        let attack = false;
+
+        // Simple AI: approach enemy, attack when in range
+        if (dist > stats.attackRange * 0.8) {
+            // Move toward enemy
+            const dir = normalize(enemy.x - unit.x, enemy.y - unit.y);
+            moveX = dir.x * stats.speed;
+            moveY = dir.y * stats.speed;
+        } else if (dist < stats.attackRange * 0.5) {
+            // Too close, back off slightly
+            const dir = normalize(unit.x - enemy.x, unit.y - enemy.y);
+            moveX = dir.x * stats.speed * 0.5;
+            moveY = dir.y * stats.speed * 0.5;
+        } else {
+            // Strafe randomly
+            const strafeAngle = Math.atan2(enemy.y - unit.y, enemy.x - unit.x) + Math.PI / 2;
+            const strafeDir = unit.strafeDir || (Math.random() > 0.5 ? 1 : -1);
+            moveX = Math.cos(strafeAngle) * stats.speed * 0.7 * strafeDir;
+            moveY = Math.sin(strafeAngle) * stats.speed * 0.7 * strafeDir;
+            unit.strafeDir = strafeDir;
+            // Occasionally change strafe direction
+            if (Math.random() < 0.02) unit.strafeDir *= -1;
+        }
+
+        // Attack if in range and cooldown ready
+        if (dist <= stats.attackRange && canAttack && enemy.hp > 0) {
+            attack = true;
+        }
+
+        // Keep in arena bounds
+        const maxDist = arenaRadius * HEX_SIZE * 1.5;
+        const unitDist = distance(unit.x, unit.y, 0, 0);
+        if (unitDist > maxDist) {
+            const pullBack = normalize(-unit.x, -unit.y);
+            moveX += pullBack.x * stats.speed;
+            moveY += pullBack.y * stats.speed;
+        }
+
+        return { moveX, moveY, attack };
+    }
+
+    // ============== MAIN COMBAT ARENA ==============
+    function CombatArena() {
+        const [gameState, setGameState] = useState('waiting'); // waiting, running, victory
+        const [turn, setTurn] = useState(0);
+        const [luminosity, setLuminosity] = useState(0.5); // 0=dark, 1=light
+        const [units, setUnits] = useState([
+            {
+                id: 'tech1',
+                faction: 'tech',
+                x: -150,
+                y: 0,
+                hp: PAWN_STATS.tech.maxHp,
+                maxHp: PAWN_STATS.tech.maxHp,
+                angle: 0,
+                lastAttack: 0,
+                strafeDir: 1
+            },
+            {
+                id: 'gaia1',
+                faction: 'gaia',
+                x: 150,
+                y: 0,
+                hp: PAWN_STATS.gaia.maxHp,
+                maxHp: PAWN_STATS.gaia.maxHp,
+                angle: Math.PI,
+                lastAttack: 0,
+                strafeDir: -1
+            }
+        ]);
+        const [projectiles, setProjectiles] = useState([]);
+        const [battleLog, setBattleLog] = useState([]);
+        const [winner, setWinner] = useState(null);
+
+        const arenaHexes = generateArenaHexes(ARENA_RADIUS);
+        const svgSize = ARENA_RADIUS * HEX_SIZE * 3 + 100;
+        const centerX = svgSize / 2;
+        const centerY = svgSize / 2;
+
+        const addLog = useCallback((msg) => {
+            setBattleLog(prev => [...prev.slice(-8), { time: Date.now(), msg }]);
+        }, []);
+
+        // Game loop
+        useEffect(() => {
+            if (gameState !== 'running') return;
+
+            const interval = setInterval(() => {
+                setUnits(prevUnits => {
+                    const newUnits = prevUnits.map(u => ({ ...u }));
+                    const [unit1, unit2] = newUnits;
+
+                    // Check for victory
+                    if (unit1.hp <= 0 || unit2.hp <= 0) {
+                        const victor = unit1.hp > 0 ? unit1 : unit2;
+                        setWinner(victor.faction);
+                        setGameState('victory');
+                        addLog(`${PAWN_STATS[victor.faction].name} WINS!`);
+                        return newUnits;
+                    }
+
+                    // Run AI for each unit
+                    newUnits.forEach((unit, idx) => {
+                        const enemy = newUnits[1 - idx];
+                        const ai = runAI(unit, enemy, ARENA_RADIUS);
+                        
+                        unit.x += ai.moveX;
+                        unit.y += ai.moveY;
+                        unit.angle = Math.atan2(enemy.y - unit.y, enemy.x - unit.x);
+
+                        // Apply regen for Gaia units
+                        const stats = PAWN_STATS[unit.faction];
+                        if (stats.regenRate > 0 && unit.hp < unit.maxHp) {
+                            unit.hp = Math.min(unit.maxHp, unit.hp + stats.regenRate * (TICK_RATE / 1000));
+                        }
+
+                        // Fire projectile
+                        if (ai.attack) {
+                            unit.lastAttack = Date.now();
+                            setProjectiles(prev => [...prev, {
+                                id: `proj-${Date.now()}-${unit.id}`,
+                                faction: unit.faction,
+                                x: unit.x,
+                                y: unit.y,
+                                targetId: enemy.id,
+                                angle: unit.angle
+                            }]);
+                        }
+                    });
+
+                    return newUnits;
+                });
+
+                // Update projectiles
+                setProjectiles(prev => {
+                    const newProj = [];
+                    prev.forEach(proj => {
+                        const stats = PAWN_STATS[proj.faction];
+                        proj.x += Math.cos(proj.angle) * stats.projectileSpeed;
+                        proj.y += Math.sin(proj.angle) * stats.projectileSpeed;
+
+                        // Check hit
+                        setUnits(prevUnits => {
+                            const target = prevUnits.find(u => u.id === proj.targetId);
+                            if (target && distance(proj.x, proj.y, target.x, target.y) < 25) {
+                                // Hit!
+                                const newUnits = prevUnits.map(u => {
+                                    if (u.id === target.id) {
+                                        const newHp = Math.max(0, u.hp - stats.damage);
+                                        addLog(`${PAWN_STATS[proj.faction].name} hits for ${stats.damage} dmg!`);
+                                        return { ...u, hp: newHp };
+                                    }
+                                    return u;
+                                });
+                                return newUnits;
+                            }
+                            return prevUnits;
+                        });
+
+                        // Check hit or out of bounds
+                        const hitTarget = false; // Checked above
+                        const outOfBounds = distance(proj.x, proj.y, 0, 0) > svgSize / 2;
+                        if (!hitTarget && !outOfBounds) {
+                            // Check if we already hit
+                            setUnits(prevUnits => {
+                                const target = prevUnits.find(u => u.id === proj.targetId);
+                                if (target && distance(proj.x, proj.y, target.x, target.y) >= 25) {
+                                    newProj.push(proj);
+                                }
+                                return prevUnits;
+                            });
+                        }
+                    });
+                    return prev.filter(p => {
+                        const outOfBounds = distance(p.x, p.y, 0, 0) > svgSize / 2;
+                        return !outOfBounds;
+                    });
+                });
+
+                // Luminosity cycle
+                setTurn(t => t + 1);
+                setLuminosity(l => {
+                    const cycle = Math.sin(Date.now() / 3000) * 0.5 + 0.5;
+                    return cycle;
+                });
+
+            }, TICK_RATE);
+
+            return () => clearInterval(interval);
+        }, [gameState, addLog, svgSize]);
+
+        const startBattle = () => {
+            setUnits([
+                {
+                    id: 'tech1',
+                    faction: 'tech',
+                    x: -150,
+                    y: 0,
+                    hp: PAWN_STATS.tech.maxHp,
+                    maxHp: PAWN_STATS.tech.maxHp,
+                    angle: 0,
+                    lastAttack: 0,
+                    strafeDir: 1
+                },
+                {
+                    id: 'gaia1',
+                    faction: 'gaia',
+                    x: 150,
+                    y: 0,
+                    hp: PAWN_STATS.gaia.maxHp,
+                    maxHp: PAWN_STATS.gaia.maxHp,
+                    angle: Math.PI,
+                    lastAttack: 0,
+                    strafeDir: -1
+                }
+            ]);
+            setProjectiles([]);
+            setBattleLog([]);
+            setWinner(null);
+            setGameState('running');
+            addLog('BATTLE START!');
+        };
+
+        const lumPhase = luminosity < 0.25 ? 'Dark' : 
+                         luminosity < 0.5 ? 'Dim' : 
+                         luminosity < 0.75 ? 'Bright' : 'Light';
+
+        return (
+            <div style={{ maxWidth: '900px', margin: '0 auto' }}>
+                <h1 style={{ 
+                    textAlign: 'center', 
+                    marginBottom: '10px',
+                    background: 'linear-gradient(90deg, #00aaff, #44cc44)',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                    fontSize: '28px'
+                }}>
+                    ZARCHON - Combat Arena Test
+                </h1>
+
+                {/* Controls */}
+                <div style={{ 
+                    display: 'flex', 
+                    justifyContent: 'center', 
+                    gap: '20px', 
+                    marginBottom: '15px',
+                    flexWrap: 'wrap'
+                }}>
+                    <button
+                        onClick={startBattle}
+                        style={{
+                            padding: '12px 30px',
+                            fontSize: '16px',
+                            background: gameState === 'running' ? '#666' : 'linear-gradient(135deg, #00aaff, #0066cc)',
+                            color: '#fff',
+                            border: 'none',
+                            borderRadius: '8px',
+                            cursor: gameState === 'running' ? 'not-allowed' : 'pointer',
+                            fontWeight: 'bold',
+                            boxShadow: '0 4px 15px rgba(0,170,255,0.3)'
+                        }}
+                        disabled={gameState === 'running'}
+                    >
+                        {gameState === 'waiting' ? '⚔️ START BATTLE' : 
+                         gameState === 'running' ? '⏳ FIGHTING...' : 
+                         '🔄 RESTART'}
+                    </button>
+                    <div style={{ 
+                        padding: '12px 20px', 
+                        background: 'rgba(255,255,255,0.1)',
+                        borderRadius: '8px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px'
+                    }}>
+                        <span>Luminosity:</span>
+                        <div style={{
+                            width: '80px',
+                            height: '20px',
+                            background: `linear-gradient(90deg, #222 0%, #fff ${luminosity * 100}%)`,
+                            borderRadius: '4px',
+                            border: '1px solid #444'
+                        }} />
+                        <span style={{ minWidth: '50px' }}>{lumPhase}</span>
+                    </div>
+                </div>
+
+                {/* Stats display */}
+                <div style={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-around', 
+                    marginBottom: '10px',
+                    padding: '10px',
+                    background: 'rgba(0,0,0,0.3)',
+                    borderRadius: '8px'
+                }}>
+                    {units.map(unit => {
+                        const stats = PAWN_STATS[unit.faction];
+                        return (
+                            <div key={unit.id} style={{ textAlign: 'center' }}>
+                                <div style={{ 
+                                    color: stats.color, 
+                                    fontWeight: 'bold',
+                                    fontSize: '16px'
+                                }}>
+                                    {stats.name}
+                                </div>
+                                <div style={{ fontSize: '24px', fontWeight: 'bold' }}>
+                                    {Math.ceil(unit.hp)} / {unit.maxHp} HP
+                                </div>
+                                <div style={{ fontSize: '12px', opacity: 0.7 }}>
+                                    DMG: {stats.damage} | SPD: {stats.speed} | RNG: {stats.attackRange}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+
+                {/* Victory banner */}
+                {winner && (
+                    <div style={{
+                        textAlign: 'center',
+                        padding: '15px',
+                        marginBottom: '10px',
+                        background: `linear-gradient(135deg, ${PAWN_STATS[winner].color}44, ${PAWN_STATS[winner].accentColor}44)`,
+                        border: `3px solid ${PAWN_STATS[winner].color}`,
+                        borderRadius: '12px',
+                        fontSize: '24px',
+                        fontWeight: 'bold',
+                        color: PAWN_STATS[winner].color
+                    }}>
+                        🏆 {PAWN_STATS[winner].name.toUpperCase()} VICTORIOUS! 🏆
+                    </div>
+                )}
+
+                {/* Arena */}
+                <div style={{ 
+                    display: 'flex', 
+                    justifyContent: 'center',
+                    background: 'rgba(0,0,0,0.4)',
+                    borderRadius: '12px',
+                    padding: '10px'
+                }}>
+                    <svg width={svgSize} height={svgSize} style={{ display: 'block' }}>
+                        {/* Arena hexes */}
+                        <g transform={`translate(${centerX}, ${centerY})`}>
+                            {arenaHexes.map(hex => (
+                                <ArenaHex
+                                    key={`${hex.q},${hex.r}`}
+                                    q={hex.q}
+                                    r={hex.r}
+                                    size={HEX_SIZE}
+                                    centerX={0}
+                                    centerY={0}
+                                    luminosity={luminosity}
+                                />
+                            ))}
+                        </g>
+
+                        {/* Arena border */}
+                        <circle
+                            cx={centerX}
+                            cy={centerY}
+                            r={ARENA_RADIUS * HEX_SIZE * 1.7}
+                            fill="none"
+                            stroke="#444"
+                            strokeWidth="4"
+                        />
+
+                        {/* Units */}
+                        <g transform={`translate(${centerX}, ${centerY})`}>
+                            {units.map(unit => (
+                                <Unit 
+                                    key={unit.id} 
+                                    unit={unit}
+                                    isActive={gameState === 'running'}
+                                />
+                            ))}
+                            {/* Projectiles */}
+                            {projectiles.map(proj => (
+                                <Projectile key={proj.id} proj={proj} />
+                            ))}
+                        </g>
+                    </svg>
+                </div>
+
+                {/* Battle log */}
+                <div style={{
+                    marginTop: '15px',
+                    padding: '10px',
+                    background: 'rgba(0,0,0,0.4)',
+                    borderRadius: '8px',
+                    maxHeight: '120px',
+                    overflow: 'auto',
+                    fontSize: '12px',
+                    fontFamily: 'monospace'
+                }}>
+                    <div style={{ fontWeight: 'bold', marginBottom: '5px', color: '#888' }}>
+                        BATTLE LOG
+                    </div>
+                    {battleLog.map((log, i) => (
+                        <div key={i} style={{ opacity: 0.9 }}>
+                            [{new Date(log.time).toLocaleTimeString()}] {log.msg}
+                        </div>
+                    ))}
+                    {battleLog.length === 0 && (
+                        <div style={{ opacity: 0.5 }}>Press START BATTLE to begin...</div>
+                    )}
+                </div>
+
+                {/* Unit comparison */}
+                <div style={{
+                    marginTop: '15px',
+                    padding: '15px',
+                    background: 'rgba(0,0,0,0.3)',
+                    borderRadius: '8px',
+                    fontSize: '12px'
+                }}>
+                    <div style={{ fontWeight: 'bold', marginBottom: '10px', textAlign: 'center' }}>
+                        UNIT COMPARISON
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-around' }}>
+                        <div style={{ color: PAWN_STATS.tech.color }}>
+                            <strong>Sentinel Drone (Tech)</strong><br/>
+                            • Faster attack cooldown (800ms)<br/>
+                            • Longer range (120px)<br/>
+                            • Faster projectiles<br/>
+                            • No regeneration
+                        </div>
+                        <div style={{ color: PAWN_STATS.gaia.color }}>
+                            <strong>Thornling (Gaia)</strong><br/>
+                            • Slower attack (900ms)<br/>
+                            • Shorter range (100px)<br/>
+                            • Slower projectiles<br/>
+                            • Regenerates 1 HP / 5 sec
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // ============== ERROR BOUNDARY ==============
+    class ErrorBoundary extends React.Component {
+        constructor(props) {
+            super(props);
+            this.state = { hasError: false, error: null };
+        }
+        static getDerivedStateFromError(error) {
+            return { hasError: true, error };
+        }
+        render() {
+            if (this.state.hasError) {
+                return (
+                    <div style={{ padding: '40px', color: '#f66' }}>
+                        <h1>Error</h1>
+                        <pre style={{ background: '#111', padding: '20px', borderRadius: '8px' }}>
+                            {this.state.error?.toString()}
+                        </pre>
+                        <button onClick={() => window.location.reload()}>Reload</button>
+                    </div>
+                );
+            }
+            return this.props.children;
+        }
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(
+        <ErrorBoundary>
+            <CombatArena />
+        </ErrorBoundary>
+    );
+    </script>
+</body>
+</html>
