@@ -33,7 +33,29 @@ Inspired by the classic Archon series, Zarchon modernizes the formula with:
 | Raspberry Pi | Supported |
 | Console | Future |
 
-**Critical Requirement:** No input method (touch, mouse/keyboard, controller) should have an advantage over another.
+---
+
+## 📁 Project Structure
+
+```
+zarchon-1/
+├── game/                 # ← ACTIVE Godot project
+│   ├── scenes/
+│   ├── scripts/
+│   │   ├── HexCell.gd
+│   │   ├── HexGrid.gd
+│   │   ├── Unit.gd
+│   │   └── Board.gd
+│   └── project.godot
+├── docs/
+│   └── design/
+│       └── PHASE2-TEAM-PLANNING.md
+├── _archive_stub/        # ← OLD/UNUSED files (ignore)
+├── DEVLOG.md
+└── README.md
+```
+
+**To open in Godot:** Import `game/project.godot`
 
 ---
 
@@ -51,20 +73,6 @@ Organic beasts, elementals, and natural forces. Excels at area control and susta
 
 ---
 
-## 📁 Project Structure
-
-```
-zarchon-1/
-├── docs/design/          # Design documents
-├── Zarchon/              # Godot project
-│   ├── scenes/
-│   └── scripts/
-├── DEVLOG.md             # Development log
-└── README.md             # This file
-```
-
----
-
 ## 🚀 Development Status
 
 See [DEVLOG.md](DEVLOG.md) for detailed progress.
@@ -76,18 +84,10 @@ See [DEVLOG.md](DEVLOG.md) for detailed progress.
 
 ---
 
-## 🛠️ Tech Stack
-
-- **Engine:** Godot 4.5.1
-- **Language:** GDScript
-- **Prototyping:** React (web-based rapid iteration)
-- **Hex Math:** Axial coordinates (Red Blob Games)
-
----
-
 ## 📚 Documentation
 
 - [Phase 2: Team Planning](docs/design/PHASE2-TEAM-PLANNING.md) - Faction and unit design
+- [Quickstart Guide](game/QUICKSTART.md) - How to run the game
 
 ---
 
@@ -97,12 +97,6 @@ See [DEVLOG.md](DEVLOG.md) for detailed progress.
 - **Archon Ultra** (1994) by Strategic Simulations Inc.
 - Hex grid mathematics from Red Blob Games
 - Built by Liam with Claude (Anthropic)
-
----
-
-## 📄 License
-
-TBD - Currently in prototype/development phase
 
 ---
 
